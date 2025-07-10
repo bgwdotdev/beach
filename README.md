@@ -49,4 +49,6 @@ pub fn main() {
 // see shore for application implementation
 ```
 
-
+```sh
+ssh localhost -p 2222
+```
