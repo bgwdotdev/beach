@@ -29,7 +29,7 @@ pub fn main() {
       auth: beach.auth_public_key(fn(username, public_key) {
         let challenge =
           "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII9JoJW9cu1+L5/m2uc7YPp7PB7tVGpUAZ4OWnaR36ZT bgw@bgw.dev"
-          |> beach.to_public_key
+          |> beach.public_key
         challenge == public_key && username == "bgw"
       }),
     )

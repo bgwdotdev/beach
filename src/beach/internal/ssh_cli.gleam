@@ -107,7 +107,7 @@ pub fn handle_msg(
   }
 }
 
-@external(erlang, "shore_ffi", "to_handle_msg")
+@external(erlang, "beach_ffi", "to_handle_msg")
 fn to_handle_msg(msg: HandleMsgFfi) -> HandleMsg
 
 fn render_loop(
@@ -163,7 +163,7 @@ pub fn terminate(_reason: Reason, state: State(msg)) -> Nil {
   Nil
 }
 
-@external(erlang, "shore_ffi", "ssh_connection_send")
+@external(erlang, "beach_ffi", "ssh_connection_send")
 fn send(ref: Pid, id: Int, data: String) -> Result(Nil, Reason)
 
 //
@@ -172,5 +172,5 @@ fn send(ref: Pid, id: Int, data: String) -> Result(Nil, Reason)
 
 pub type Continue(state)
 
-@external(erlang, "shore_ffi", "to_continue")
+@external(erlang, "beach_ffi", "to_continue")
 fn to_continue(result: Result(state, #(Int, Reason))) -> Continue(state)
