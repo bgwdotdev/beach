@@ -1,5 +1,5 @@
 -module(beach_ffi).
--export([daemon/2, to_continue/1, to_handle_msg/1, ssh_connection_send/3]).
+-export([daemon/2, to_continue/1, to_handle_msg/1, ssh_connection_send/4]).
 
 daemon(Port, Opts) ->
   case ssh:daemon(Port, Opts) of
@@ -17,7 +17,8 @@ daemon(Port, Opts) ->
 
 to_continue(Result) ->
   case Result of
-    {error, {Id, Reason}} -> {stop, Id, Reason};
+    {error, {stop_reason, Reason}} -> {stop, Reason};
+    {error, {stop_state, T = {terminate_state, _, ChannelId, _, _}}} -> {stop, ChannelId, T};
     {ok, State} -> {ok, State}
   end.
 
@@ -28,9 +29,10 @@ to_handle_msg(Msg) ->
     Msg -> Msg
   end.
 
-ssh_connection_send(Pid, Id, Data) ->
-  case ssh_connection:send(Pid, Id, Data) of
+ssh_connection_send(Pid, Id, Data, Timeout) ->
+  case ssh_connection:send(Pid, Id, 0, Data, Timeout) of
     ok -> {ok, nil};
-    Error -> Error
+    {error, closed} -> {error, channel_closed};
+    {error, timeout} -> {error, send_timeout}
   end.
 

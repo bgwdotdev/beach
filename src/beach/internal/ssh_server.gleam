@@ -1,7 +1,6 @@
 import gleam/erlang/atom
 import gleam/erlang/charlist.{type Charlist}
 import gleam/erlang/process
-import gleam/result
 import shore/internal as shore_internal
 
 pub type StartError {
@@ -29,7 +28,7 @@ pub type Config {
     /// Path to directory with ssh_host keys
     /// https://www.erlang.org/doc/apps/ssh/ssh_file#SYSDIR
     host_key_directory: String,
-    /// TODO
+    /// authentication method
     auth: Auth,
   )
 }
@@ -85,6 +84,7 @@ type AuthState {
   AuthState(throttle: Int)
 }
 
+/// adds expanding delay after failed login attempts
 fn throttle(ok: Bool, state: AuthState) -> #(Bool, AuthState) {
   case ok, state {
     True, _ -> #(True, Undefined)
