@@ -1,3 +1,4 @@
+import beach/internal/ssh_server
 import gleam/erlang/charlist.{type Charlist}
 import gleam/erlang/process.{type Pid, type Subject}
 import gleam/option.{Some}
@@ -91,16 +92,22 @@ type SendError {
 //
 
 pub type State(model, msg) {
-  Init(spec: shore_internal.Spec(model, msg))
-  State(ssh_pid: Pid, channel_id: ChannelId, shore: Subject(shore.Event(msg)))
+  Init(spec: shore_internal.Spec(model, msg), config: ssh_server.Config(msg))
+  State(
+    ssh_pid: Pid,
+    channel_id: ChannelId,
+    shore: Subject(shore.Event(msg)),
+    on_disconnect: fn(ssh_server.ConnectionInfo, Subject(shore.Event(msg))) ->
+      Nil,
+  )
 }
 
 pub fn init(
-  args: List(shore_internal.Spec(model, msg)),
+  args: List(ssh_server.SshCliOptions(model, msg)),
 ) -> Continue(State(model, msg)) {
   case args {
     // NOTE: Second arg here is the atom `disabled` passed by setting `Exec(Disabled)`
-    [spec, _] -> Init(spec:) |> Ok
+    [opts, _] -> Init(spec: opts.spec, config: opts.config) |> Ok
     args ->
       Error(StopReason(Shutdown(UnexpectedArgsOnInit(string.inspect(args)))))
   }
@@ -130,19 +137,33 @@ pub fn handle_msg(
           |> shore_internal.start_custom_renderer(Some(renderer))
           |> result.map_error(ShoreInitFailure),
         )
-        Ok(State(ssh_pid: pid, channel_id: channel_id, shore:))
+        let connection = ssh_server.to_connection_info(connection_info(pid))
+        state.config.on_connect(connection, shore)
+        Ok(State(
+          ssh_pid: pid,
+          channel_id: channel_id,
+          shore:,
+          on_disconnect: state.config.on_disconnect,
+        ))
       }
       |> result.map_error(fn(error) {
-        StopState(TerminateState(pid, channel_id, state, Error(error)))
+        StopState(TerminateState(
+          ssh_pid: pid,
+          channel_id: channel_id,
+          shore: process.new_subject(),
+          result: Error(error),
+          on_disconnect: state.config.on_disconnect,
+        ))
       })
     }
     SshExit(reason:, ..), State(..) as state ->
       Error(
         StopState(TerminateState(
-          state.ssh_pid,
-          state.channel_id,
-          state,
-          Error(ExitMessage(string.inspect(reason))),
+          ssh_pid: state.ssh_pid,
+          channel_id: state.channel_id,
+          shore: state.shore,
+          result: Error(ExitMessage(string.inspect(reason))),
+          on_disconnect: state.on_disconnect,
         )),
       )
     msg, Init(..) ->
@@ -205,10 +226,11 @@ pub fn handle_ssh_msg(
         SshCm(_, Closed(..)) ->
           Error(
             StopState(TerminateState(
-              state.ssh_pid,
-              state.channel_id,
-              state,
-              Ok(Nil),
+              ssh_pid: state.ssh_pid,
+              channel_id: state.channel_id,
+              shore: state.shore,
+              result: Ok(Nil),
+              on_disconnect: state.on_disconnect,
             )),
           )
           |> to_continue
@@ -221,10 +243,11 @@ pub fn handle_ssh_msg(
         SshCm(_, ExitSignal(..)) ->
           Error(
             StopState(TerminateState(
-              state.ssh_pid,
-              state.channel_id,
-              state,
-              Ok(Nil),
+              ssh_pid: state.ssh_pid,
+              channel_id: state.channel_id,
+              shore: state.shore,
+              result: Ok(Nil),
+              on_disconnect: state.on_disconnect,
             )),
           )
           |> to_continue
@@ -240,17 +263,22 @@ pub fn handle_ssh_msg(
 // EXIT
 //
 
+// note: any changes to this may need to be updated in beach_ffi.to_continue
 pub opaque type TerminateState(model, msg) {
   TerminateState(
     ssh_pid: Pid,
     channel_id: ChannelId,
-    state: State(model, msg),
+    shore: Subject(shore.Event(msg)),
     result: Result(Nil, SshCliError),
+    on_disconnect: fn(ssh_server.ConnectionInfo, Subject(shore.Event(msg))) ->
+      Nil,
   )
 }
 
 // NOTE: return value is ignored
 pub fn terminate(_reason: Reason, state: TerminateState(model, msg)) -> Nil {
+  let connection = ssh_server.to_connection_info(connection_info(state.ssh_pid))
+  state.on_disconnect(connection, state.shore)
   let assert Ok(Nil) =
     shore_internal.restore_terminal()
     |> send(state.ssh_pid, state.channel_id, _, timeout)
@@ -280,3 +308,6 @@ fn to_continue(result: Result(state, Stop(model, msg))) -> Continue(state)
 
 @external(erlang, "beach_ffi", "to_handle_msg")
 fn to_handle_msg(msg: HandleMsgFfi) -> HandleMsg
+
+@external(erlang, "ssh", "connection_info")
+fn connection_info(pid: Pid) -> ssh_server.ConnectionInfoFfi

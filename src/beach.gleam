@@ -1,6 +1,7 @@
 import beach/internal/ssh_server
-import gleam/erlang/process
+import gleam/erlang/process.{type Subject}
 import gleam/result
+import shore
 import shore/internal as shore_internal
 
 pub type StartError {
@@ -14,6 +15,10 @@ pub type StartError {
   SshDaemonFault(String)
 }
 
+/// TODO
+pub type ConnectionInfo =
+  ssh_server.ConnectionInfo
+
 fn error_to_public(error: ssh_server.StartError) -> StartError {
   case error {
     ssh_server.AddressInUse -> AddressInUse
@@ -21,6 +26,21 @@ fn error_to_public(error: ssh_server.StartError) -> StartError {
     ssh_server.HostKeyNotFound -> HostKeyNotFound
     ssh_server.SshDaemonFault(e) -> SshDaemonFault(e)
   }
+}
+
+/// TODO
+pub fn connection_username(info: ssh_server.ConnectionInfo) -> String {
+  info.username
+}
+
+/// TODO
+pub fn connection_ip_address(info: ssh_server.ConnectionInfo) -> String {
+  info.ip
+}
+
+/// TODO
+pub fn connection_port(info: ssh_server.ConnectionInfo) -> Int {
+  info.port
 }
 
 /// Configuration for a beach ssh server
@@ -37,8 +57,24 @@ pub fn config(
   port port: Int,
   host_key_directory host_key_directory: String,
   auth auth: ssh_server.Auth,
-) -> ssh_server.Config {
-  ssh_server.Config(port:, host_key_directory:, auth:)
+  on_connect on_connect: fn(
+    ssh_server.ConnectionInfo,
+    Subject(shore.Event(msg)),
+  ) ->
+    Nil,
+  on_disconnect on_disconnect: fn(
+    ssh_server.ConnectionInfo,
+    Subject(shore.Event(msg)),
+  ) ->
+    Nil,
+) -> ssh_server.Config(msg) {
+  ssh_server.Config(
+    port:,
+    host_key_directory:,
+    auth:,
+    on_connect:,
+    on_disconnect:,
+  )
 }
 
 /// Starts an ssh server serving shore application to connecting clients.
@@ -69,7 +105,7 @@ pub fn config(
 ///
 pub fn start(
   spec: shore_internal.Spec(model, msg),
-  config: ssh_server.Config,
+  config: ssh_server.Config(msg),
 ) -> Result(process.Pid, StartError) {
   ssh_server.serve(spec, config) |> result.map_error(error_to_public)
 }
