@@ -16,6 +16,9 @@ version = "1.0.0"
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 shore = { path = "../../shore" }
 beach = { path = "../" }
+gleam_erlang = ">= 1.2.0 and < 2.0.0"
+gleam_time = ">= 1.4.0 and < 2.0.0"
+gleam_otp = ">= 1.0.0 and < 2.0.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
