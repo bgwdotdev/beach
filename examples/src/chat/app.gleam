@@ -162,10 +162,7 @@ fn view_fault(model: Model) -> shore.Node(Msg) {
 
 fn view_input(model: Model) -> layout.Cell(Msg) {
   ui.box(
-    [
-      ui.input(">", model.input, style.Fill, SetInput),
-      ui.keybind(key.Enter, SendInput),
-    ],
+    [ui.input_submit(">", model.input, style.Fill, SetInput, SendInput, False)],
     Some("message"),
   )
   |> layout.cell(row: #(1, 1), col: #(0, 0), content: _)
