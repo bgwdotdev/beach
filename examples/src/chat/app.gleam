@@ -1,13 +1,12 @@
 import beach
+import gleam/bool
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/order
 import gleam/otp/actor
+import gleam/result
 import gleam/string
-import gleam/time/duration
-import gleam/time/timestamp.{type Timestamp}
 import shore
 import shore/key
 import shore/layout
@@ -20,8 +19,8 @@ pub fn main() {
   let assert Ok(actor.Started(data: server, ..)) = server()
 
   let spec =
-    shore.spec_with_subject(
-      init: fn(subj) { init(subj, server) },
+    shore.spec(
+      init: fn() { init(server) },
       update:,
       view:,
       exit: process.new_subject(),
@@ -33,9 +32,29 @@ pub fn main() {
       port: 2222,
       host_key_directory: ".",
       auth: beach.auth_anonymous(),
+      on_connect: fn(conn, shore) { on_connect(conn, shore, server) },
+      on_disconnect: fn(conn, shore) { on_disconnect(conn, shore, server) },
     )
   let assert Ok(_) = beach.start(spec, config)
   process.sleep_forever()
+}
+
+fn on_connect(
+  connection: beach.ConnectionInfo,
+  shore: Subject(shore.Event(Msg)),
+  server: Subject(ServerMsg),
+) -> Nil {
+  let username = beach.connection_username(connection)
+  process.send(server, NewSubscriber(shore, username))
+  process.send(shore, shore.send(SetUsername(username)))
+}
+
+fn on_disconnect(
+  _connection: beach.ConnectionInfo,
+  shore: Subject(shore.Event(Msg)),
+  server: Subject(ServerMsg),
+) -> Nil {
+  process.send(server, RemoveSubscriber(shore))
 }
 
 // MODEL
@@ -43,7 +62,6 @@ pub fn main() {
 type Model {
   Model(
     error: Option(ServerError),
-    shore: Subject(Msg),
     page: Page,
     username: String,
     input: String,
@@ -54,7 +72,8 @@ type Model {
 }
 
 type Page {
-  Username
+  Loading
+  Fault
   Chatroom
 }
 
@@ -66,15 +85,11 @@ type User {
   User(username: String)
 }
 
-fn init(
-  subj: Subject(Msg),
-  server: Subject(ServerMsg),
-) -> #(Model, List(fn() -> Msg)) {
+fn init(server: Subject(ServerMsg)) -> #(Model, List(fn() -> Msg)) {
   let model =
     Model(
       error: None,
-      shore: subj,
-      page: Username,
+      page: Loading,
       username: "",
       input: "",
       chat: [],
@@ -88,30 +103,21 @@ fn init(
 // UPDATE
 
 type Msg {
+  Connecting(Result(String, ServerError))
   SetUsername(String)
-  SendUsername
   SetInput(String)
   SendInput
-  Tick
+  Sync(List(Chat), List(User))
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, List(fn() -> Msg)) {
   case msg {
-    SetUsername(username) -> #(Model(..model, username:), [])
-    SendUsername -> {
-      let attempt =
-        process.call(model.server, 1000, NewUser(
-          subject: _,
-          username: model.username,
-        ))
-      case attempt {
-        Ok(Nil) -> {
-          process.spawn(fn() { tick(model) })
-          #(Model(..model, page: Chatroom), [])
-        }
-        Error(error) -> #(Model(..model, error: Some(error)), [])
-      }
-    }
+    Connecting(Ok(username)) -> #(Model(..model, username:, page: Chatroom), [])
+    Connecting(Error(error)) -> #(
+      Model(..model, error: Some(error), page: Fault),
+      [],
+    )
+    SetUsername(username) -> #(Model(..model, username: username), [])
     SetInput(input) -> #(Model(..model, input:), [])
     SendInput ->
       case
@@ -120,28 +126,16 @@ fn update(model: Model, msg: Msg) -> #(Model, List(fn() -> Msg)) {
         Ok(Nil) -> #(Model(..model, input: ""), [])
         Error(error) -> #(Model(..model, error: Some(error)), [])
       }
-    Tick ->
-      case process.call(model.server, 10, GetChat(_, model.username)) {
-        Ok(#(chat, users)) -> #(
-          Model(..model, chat:, users: list.map(users, User)),
-          [],
-        )
-        Error(error) -> #(Model(..model, error: Some(error)), [])
-      }
+    Sync(chat, users) -> #(Model(..model, chat:, users:), [])
   }
-}
-
-fn tick(model: Model) {
-  process.send(model.shore, Tick)
-  process.sleep(1000)
-  tick(model)
 }
 
 // VIEW
 
 fn view(model: Model) -> shore.Node(Msg) {
   case model.page {
-    Username -> layout.center(view_username(model), style.Px(50), style.Px(5))
+    Loading -> layout.center(ui.text("loading"), style.Px(10), style.Px(1))
+    Fault -> view_fault(model)
     Chatroom ->
       layout.grid(
         gap: 0,
@@ -152,16 +146,18 @@ fn view(model: Model) -> shore.Node(Msg) {
   }
 }
 
-fn view_username(model: Model) -> shore.Node(Msg) {
-  [
-    ui.input("username", model.username, style.Fill, SetUsername),
-    ui.keybind(key.Enter, SendUsername),
-    case model.error {
-      None -> ui.br()
-      Some(error) -> ui.text(string.inspect(error))
-    },
-  ]
-  |> ui.box(Some("login"))
+fn view_fault(model: Model) -> shore.Node(Msg) {
+  let msg = case model.error {
+    Some(UsernameExists) -> "username is already taken"
+    Some(UsernameTooShort) ->
+      "username is too short, must be at least 3 characters long"
+    None -> "unexpect error occured"
+  }
+  let content =
+    [ui.text(msg)]
+    |> ui.box(Some("error"))
+  let len = string.length(msg) + 7
+  layout.center(content, style.Px(len), style.Px(3))
 }
 
 fn view_input(model: Model) -> layout.Cell(Msg) {
@@ -178,15 +174,21 @@ fn view_input(model: Model) -> layout.Cell(Msg) {
 fn view_chat(model: Model) -> layout.Cell(Msg) {
   model.chat
   |> list.reverse
-  |> list.map(fn(chat) { ui.text(chat.username <> ": " <> chat.content) })
-  //|> ui.col
-  //|> fn(i) { [i] }
+  |> list.map(fn(chat) { chat.username <> ": " <> chat.content })
+  |> string.join("\n")
+  |> fn(chat) { [ui.text(chat)] }
   |> ui.box(Some("chat"))
   |> layout.cell(row: #(0, 0), col: #(0, 0), content: _)
 }
 
 fn view_users(model: Model) -> layout.Cell(Msg) {
-  list.map(model.users, fn(user) { ui.text(user.username) })
+  model.users
+  |> list.map(fn(user) {
+    let User(user) = user
+    user
+  })
+  |> string.join("\n")
+  |> fn(users) { [ui.text(users)] }
   |> ui.box(Some("users"))
   |> layout.cell(row: #(0, 1), col: #(1, 1), content: _)
 }
@@ -194,19 +196,16 @@ fn view_users(model: Model) -> layout.Cell(Msg) {
 // SERVER
 
 type State {
-  State(chat: List(Chat), users: Dict(String, Timestamp))
+  State(chat: List(Chat), subscribers: Dict(Subject(shore.Event(Msg)), User))
 }
 
 type ServerMsg {
-  NewUser(subject: process.Subject(Result(Nil, ServerError)), username: String)
+  NewSubscriber(shore: Subject(shore.Event(Msg)), username: String)
+  RemoveSubscriber(shore: Subject(shore.Event(Msg)))
   NewChat(
     subject: process.Subject(Result(Nil, ServerError)),
     username: String,
     content: String,
-  )
-  GetChat(
-    subject: process.Subject(Result(#(List(Chat), List(String)), ServerError)),
-    username: String,
   )
   ServerTick
 }
@@ -229,7 +228,7 @@ fn server_init(
   subject: Subject(ServerMsg),
 ) -> Result(actor.Initialised(State, ServerMsg, Subject(ServerMsg)), String) {
   let _pid = process.spawn(fn() { server_tick(subject) })
-  let state = State(chat: [], users: dict.new())
+  let state = State(chat: [], subscribers: dict.new())
   actor.initialised(state)
   |> actor.returning(subject)
   |> Ok
@@ -237,31 +236,31 @@ fn server_init(
 
 fn server_tick(subject: Subject(ServerMsg)) -> Nil {
   process.send(subject, ServerTick)
-  process.sleep(5000)
+  process.sleep(250)
   server_tick(subject)
 }
 
 fn server_loop(state: State, msg: ServerMsg) -> actor.Next(State, a) {
   case msg {
-    NewUser(subject:, username:) ->
-      case dict.has_key(state.users, username), string.length(username) <= 3 {
-        True, _ -> {
-          process.send(subject, Error(UsernameExists))
+    NewSubscriber(shore:, username:) ->
+      case validate_username(state, username) {
+        Ok(Nil) -> {
+          let state =
+            State(
+              ..state,
+              subscribers: dict.insert(state.subscribers, shore, User(username)),
+            )
+          process.send(shore, shore.send(Connecting(Ok(username))))
           actor.continue(state)
         }
-        _, True -> {
-          process.send(subject, Error(UsernameTooShort))
+        Error(error) -> {
+          process.send(shore, shore.send(Connecting(Error(error))))
           actor.continue(state)
-        }
-        _, _ -> {
-          process.send(subject, Ok(Nil))
-          State(
-            ..state,
-            users: dict.insert(state.users, username, timestamp.system_time()),
-          )
-          |> actor.continue
         }
       }
+    RemoveSubscriber(shore:) ->
+      State(..state, subscribers: dict.delete(state.subscribers, shore))
+      |> actor.continue
 
     NewChat(subject:, username:, content:) -> {
       process.send(subject, Ok(Nil))
@@ -269,29 +268,37 @@ fn server_loop(state: State, msg: ServerMsg) -> actor.Next(State, a) {
       |> actor.continue
     }
 
-    GetChat(subject:, username:) -> {
-      process.send(subject, Ok(#(state.chat, dict.keys(state.users))))
-      actor.continue(
-        State(
-          ..state,
-          users: dict.insert(state.users, username, timestamp.system_time()),
-        ),
-      )
-    }
-
     ServerTick -> {
-      let now = timestamp.system_time()
       let users =
-        dict.filter(state.users, fn(_, v) {
-          let diff =
-            timestamp.difference(v, now)
-            |> duration.compare(duration.seconds(5))
-          case diff {
-            order.Gt -> False
-            _ -> True
-          }
-        })
-      State(..state, users:) |> actor.continue
+        dict.values(state.subscribers)
+        |> list.sort(fn(a, b) { string.compare(a.username, b.username) })
+      let _ =
+        state.subscribers
+        |> dict.keys
+        |> list.each(process.send(_, shore.send(Sync(state.chat, users))))
+      actor.continue(state)
     }
   }
+}
+
+fn validate_username(state: State, username: String) -> Result(Nil, ServerError) {
+  use _ok <- result.try(fn() {
+    let is_match =
+      state.subscribers
+      |> dict.filter(fn(_, v) { v.username == username })
+      |> dict.is_empty
+      |> bool.negate
+    case is_match {
+      True -> Error(UsernameExists)
+      False -> Ok(Nil)
+    }
+  }())
+  use _ok <- result.try(fn() {
+    let is_short = string.length(username) <= 3
+    case is_short {
+      True -> Error(UsernameTooShort)
+      False -> Ok(Nil)
+    }
+  }())
+  Ok(Nil)
 }
