@@ -41,6 +41,8 @@ pub fn main() {
       port: 2222,
       host_key_directory: ".",
       auth: beach.auth_anonymous(),
+      on_connect: fn(_connection, _shore) { Nil },
+      on_disconnect: fn(_connection, _shore) { Nil },
     )
   let assert Ok(_) = beach.start(spec, config)
   process.sleep_forever()

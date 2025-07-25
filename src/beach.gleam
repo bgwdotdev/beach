@@ -11,13 +11,21 @@ pub type StartError {
   SshApplicationNotStarted
   /// ssh host key files not found
   HostKeyNotFound
-  /// unexpected other term() provided by ssh:daemon (which should be converted to strict value, open issue/pr if found)
+  /// unexpected other term() provided by ssh:daemon (which should be converted
+  /// to strict value, open issue/pr if found)
   SshDaemonFault(String)
 }
 
-/// TODO
-pub type ConnectionInfo =
-  ssh_server.ConnectionInfo
+/// ssh client connection.
+///
+pub type Connection =
+  ssh_server.Connection
+
+/// ssh client connection information.
+///
+pub type ConnectionInfo {
+  ConnectionInfo(username: String, ip_address: String, port: Int)
+}
 
 fn error_to_public(error: ssh_server.StartError) -> StartError {
   case error {
@@ -28,22 +36,26 @@ fn error_to_public(error: ssh_server.StartError) -> StartError {
   }
 }
 
-/// TODO
-pub fn connection_username(info: ssh_server.ConnectionInfo) -> String {
-  info.username
-}
-
-/// TODO
-pub fn connection_ip_address(info: ssh_server.ConnectionInfo) -> String {
-  info.ip
-}
-
-/// TODO
-pub fn connection_port(info: ssh_server.ConnectionInfo) -> Int {
-  info.port
+/// Provides information from an ssh connection.
+///
+pub fn connection_info(info: ssh_server.Connection) -> ConnectionInfo {
+  ConnectionInfo(username: info.username, ip_address: info.ip, port: info.port)
 }
 
 /// Configuration for a beach ssh server
+///
+/// `port`: defines the port to expose the ssh server on
+///
+/// `host_key_directory`: the directory which contains an ssh public and private host key
+///
+/// `auth`: the authentication challenge type to use (anonymous, password, keys)
+/// can be created from cli with `ssh-keygen -t ed25519 -f ssh_host_ed25519_key -N ''`
+///
+/// `on_connect`: a callback to run on a new connection, exposes the ssh username
+/// as well as the newly started shore subject (this can be sent messages via actor.send)
+///
+/// `on_disconnect`: a callback to run when a connection terminates for any
+/// reason, exposes the ssh username as well as the specific shore subject.
 ///
 /// ## Example
 /// ```gleam
@@ -51,19 +63,18 @@ pub fn connection_port(info: ssh_server.ConnectionInfo) -> Int {
 ///   port: 2222,
 ///   host_key_directory: ".",
 ///   auth: beach.auth_anonymous(),
+///   on_connect: fn(_connection, _shore) { Nil },
+///   on_disconnect: fn(_connection, _shore) { Nil },
 /// )
 /// ```
 pub fn config(
   port port: Int,
   host_key_directory host_key_directory: String,
   auth auth: ssh_server.Auth,
-  on_connect on_connect: fn(
-    ssh_server.ConnectionInfo,
-    Subject(shore.Event(msg)),
-  ) ->
+  on_connect on_connect: fn(ssh_server.Connection, Subject(shore.Event(msg))) ->
     Nil,
   on_disconnect on_disconnect: fn(
-    ssh_server.ConnectionInfo,
+    ssh_server.Connection,
     Subject(shore.Event(msg)),
   ) ->
     Nil,
@@ -82,13 +93,12 @@ pub fn config(
 /// ## Example
 /// ```gleam
 /// pub fn main() {
-///   let exit = process.new_subject()
 ///   let spec =
 ///     shore.spec(
 ///       init:,
 ///       update:,
 ///       view:,
-///       exit:,
+///       exit: process.new_subject(),
 ///       keybinds: shore.default_keybinds(),
 ///       redraw: shore.on_timer(16),
 ///     )
@@ -97,6 +107,8 @@ pub fn config(
 ///       port: 2222,
 ///       host_key_directory: ".",
 ///       auth: beach.auth_anonymous(),
+///       on_connect: fn(_connection, _shore) { Nil },
+///       on_disconnect: fn(_connection, _shore) { Nil },
 ///     )
 ///   let assert Ok(_) = beach.start(spec, config)
 ///   process.sleep_forever()

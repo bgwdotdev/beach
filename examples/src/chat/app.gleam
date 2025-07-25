@@ -8,7 +8,6 @@ import gleam/otp/actor
 import gleam/result
 import gleam/string
 import shore
-import shore/key
 import shore/layout
 import shore/style
 import shore/ui
@@ -40,17 +39,17 @@ pub fn main() {
 }
 
 fn on_connect(
-  connection: beach.ConnectionInfo,
+  connection: beach.Connection,
   shore: Subject(shore.Event(Msg)),
   server: Subject(ServerMsg),
 ) -> Nil {
-  let username = beach.connection_username(connection)
-  process.send(server, NewSubscriber(shore, username))
-  process.send(shore, shore.send(SetUsername(username)))
+  let info = beach.connection_info(connection)
+  process.send(server, NewSubscriber(shore, info.username))
+  process.send(shore, shore.send(SetUsername(info.username)))
 }
 
 fn on_disconnect(
-  _connection: beach.ConnectionInfo,
+  _connection: beach.Connection,
   shore: Subject(shore.Event(Msg)),
   server: Subject(ServerMsg),
 ) -> Nil {

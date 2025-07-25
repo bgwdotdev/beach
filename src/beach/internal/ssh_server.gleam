@@ -32,9 +32,9 @@ pub type Config(msg) {
     /// authentication method
     auth: Auth,
     /// TODO:
-    on_connect: fn(ConnectionInfo, Subject(shore.Event(msg))) -> Nil,
+    on_connect: fn(Connection, Subject(shore.Event(msg))) -> Nil,
     /// TODO:
-    on_disconnect: fn(ConnectionInfo, Subject(shore.Event(msg))) -> Nil,
+    on_disconnect: fn(Connection, Subject(shore.Event(msg))) -> Nil,
   )
 }
 
@@ -42,8 +42,8 @@ pub type SshCliOptions(model, msg) {
   SshCliOptions(spec: shore_internal.Spec(model, msg), config: Config(msg))
 }
 
-pub type ConnectionInfo {
-  ConnectionInfo(username: String, ip: String, port: Int)
+pub type Connection {
+  Connection(username: String, ip: String, port: Int)
 }
 
 /// Authentication method to use for ssh connections
@@ -196,4 +196,4 @@ pub fn decode_key(public_key: String) -> PublicKey {
 }
 
 @external(erlang, "beach_ffi", "to_connection_info")
-pub fn to_connection_info(connection: ConnectionInfoFfi) -> ConnectionInfo
+pub fn to_connection(connection: ConnectionInfoFfi) -> Connection

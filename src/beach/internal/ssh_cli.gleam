@@ -97,8 +97,7 @@ pub type State(model, msg) {
     ssh_pid: Pid,
     channel_id: ChannelId,
     shore: Subject(shore.Event(msg)),
-    on_disconnect: fn(ssh_server.ConnectionInfo, Subject(shore.Event(msg))) ->
-      Nil,
+    on_disconnect: fn(ssh_server.Connection, Subject(shore.Event(msg))) -> Nil,
   )
 }
 
@@ -137,7 +136,7 @@ pub fn handle_msg(
           |> shore_internal.start_custom_renderer(Some(renderer))
           |> result.map_error(ShoreInitFailure),
         )
-        let connection = ssh_server.to_connection_info(connection_info(pid))
+        let connection = ssh_server.to_connection(connection_info(pid))
         state.config.on_connect(connection, shore)
         Ok(State(
           ssh_pid: pid,
@@ -270,14 +269,13 @@ pub opaque type TerminateState(model, msg) {
     channel_id: ChannelId,
     shore: Subject(shore.Event(msg)),
     result: Result(Nil, SshCliError),
-    on_disconnect: fn(ssh_server.ConnectionInfo, Subject(shore.Event(msg))) ->
-      Nil,
+    on_disconnect: fn(ssh_server.Connection, Subject(shore.Event(msg))) -> Nil,
   )
 }
 
 // NOTE: return value is ignored
 pub fn terminate(_reason: Reason, state: TerminateState(model, msg)) -> Nil {
-  let connection = ssh_server.to_connection_info(connection_info(state.ssh_pid))
+  let connection = ssh_server.to_connection(connection_info(state.ssh_pid))
   state.on_disconnect(connection, state.shore)
   let assert Ok(Nil) =
     shore_internal.restore_terminal()
