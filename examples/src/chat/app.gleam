@@ -7,7 +7,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
-import logging.{Debug}
+import logging.{Debug, Info}
 import shore
 import shore/layout
 import shore/style
@@ -49,15 +49,18 @@ fn on_connect(
   server: Subject(ServerMsg),
 ) -> Nil {
   let info = beach.connection_info(connection)
+  logging.log(Info, "connected: " <> info.username)
   process.send(server, NewSubscriber(shore, info.username))
   process.send(shore, shore.send(SetUsername(info.username)))
 }
 
 fn on_disconnect(
-  _connection: beach.Connection,
+  connection: beach.Connection,
   shore: Subject(shore.Event(Msg)),
   server: Subject(ServerMsg),
 ) -> Nil {
+  let info = beach.connection_info(connection)
+  logging.log(Info, "disconnected: " <> info.username)
   process.send(server, RemoveSubscriber(shore))
 }
 
