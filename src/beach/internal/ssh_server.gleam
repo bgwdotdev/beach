@@ -1,6 +1,8 @@
 import gleam/erlang/atom
 import gleam/erlang/charlist.{type Charlist}
 import gleam/erlang/process.{type Subject}
+import gleam/list
+import gleam/option.{type Option, None, Some}
 import shore
 import shore/internal as shore_internal
 
@@ -26,15 +28,17 @@ pub type Config(msg) {
   Config(
     /// port to expose the ssh server on
     port: Int,
-    /// Path to directory with ssh_host keys
+    /// path to directory with ssh_host keys
     /// https://www.erlang.org/doc/apps/ssh/ssh_file#SYSDIR
     host_key_directory: String,
     /// authentication method
     auth: Auth,
-    /// TODO:
+    /// called after starting shore actor
     on_connect: fn(Connection, Subject(shore.Event(msg))) -> Nil,
-    /// TODO:
+    /// called on termination of ssh session
     on_disconnect: fn(Connection, Subject(shore.Event(msg))) -> Nil,
+    /// max number of ssh sessions (including logins) that can occur at once
+    max_sessions: Option(Int),
   )
 }
 
@@ -116,14 +120,23 @@ pub fn serve(
   spec: shore_internal.Spec(model, msg),
   config: Config(msg),
 ) -> Result(process.Pid, StartError) {
-  let opts = [
-    SshCli(#(atom.create(module <> "ssh_cli"), [SshCliOptions(spec:, config:)])),
-    SystemDir(config.host_key_directory |> charlist.from_string),
-    Shell(Disabled),
-    Exec(Disabled),
-    ParallelLogin(True),
-    ..config_auth(config.auth)
-  ]
+  let opts =
+    [
+      SshCli(
+        #(atom.create(module <> "ssh_cli"), [SshCliOptions(spec:, config:)]),
+      ),
+      SystemDir(config.host_key_directory |> charlist.from_string),
+      Shell(Disabled),
+      Exec(Disabled),
+      ParallelLogin(True),
+      IdString(Random),
+      IdleTime(1000),
+    ]
+    |> list.append(config_auth(config.auth))
+    |> list.append(case config.max_sessions {
+      Some(max) -> [MaxSessions(max)]
+      None -> []
+    })
   daemon(config.port, opts)
 }
 
@@ -162,7 +175,14 @@ type DaemonOption(model, msg) {
   Exec(Disabled)
   Shell(Disabled)
   ParallelLogin(Bool)
+  MaxSessions(Int)
+  IdString(IdStringCommonOption)
   KeyCb(#(atom.Atom, CheckKey))
+  IdleTime(Int)
+}
+
+type IdStringCommonOption {
+  Random
 }
 
 @external(erlang, "beach_ffi", "daemon")
@@ -197,3 +217,6 @@ pub fn decode_key(public_key: String) -> PublicKey {
 
 @external(erlang, "beach_ffi", "to_connection_info")
 pub fn to_connection(connection: ConnectionInfoFfi) -> Connection
+
+@external(erlang, "ssh_dbg", "on")
+fn ssh_debug_on() -> Nil

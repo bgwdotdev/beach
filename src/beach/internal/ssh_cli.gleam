@@ -72,10 +72,10 @@ pub opaque type Reason {
 
 type Stop(model, msg) {
   StopReason(reason: Reason)
-  StopState(state: TerminateState(model, msg))
+  StopState(state: State(model, msg))
 }
 
-type SshCliError {
+pub type SshCliError {
   UnexpectedArgsOnInit(args: String)
   ShoreRendererFailure(actor.StartError)
   ShoreInitFailure(actor.StartError)
@@ -96,8 +96,10 @@ pub type State(model, msg) {
   State(
     ssh_pid: Pid,
     channel_id: ChannelId,
+    connection: ssh_server.Connection,
     shore: Subject(shore.Event(msg)),
     on_disconnect: fn(ssh_server.Connection, Subject(shore.Event(msg))) -> Nil,
+    result: Result(Nil, SshCliError),
   )
 }
 
@@ -124,6 +126,7 @@ pub fn handle_msg(
   let msg = msg |> to_handle_msg
   case msg, state {
     SshChannelUp(channel_id, pid), Init(..) as state -> {
+      let connection = ssh_server.to_connection(connection_info(pid))
       {
         use actor.Started(data: renderer, ..) <- result.try(
           actor.new(RendererState(pid, channel_id))
@@ -136,39 +139,38 @@ pub fn handle_msg(
           |> shore_internal.start_custom_renderer(Some(renderer))
           |> result.map_error(ShoreInitFailure),
         )
-        let connection = ssh_server.to_connection(connection_info(pid))
         state.config.on_connect(connection, shore)
         Ok(State(
           ssh_pid: pid,
           channel_id: channel_id,
+          connection:,
           shore:,
           on_disconnect: state.config.on_disconnect,
+          result: Ok(Nil),
         ))
       }
       |> result.map_error(fn(error) {
-        StopState(TerminateState(
+        StopState(State(
           ssh_pid: pid,
           channel_id: channel_id,
+          connection: connection,
           shore: process.new_subject(),
-          result: Error(error),
           on_disconnect: state.config.on_disconnect,
+          result: Error(error),
         ))
       })
     }
-    SshExit(reason:, ..), State(..) as state ->
-      Error(
-        StopState(TerminateState(
-          ssh_pid: state.ssh_pid,
-          channel_id: state.channel_id,
-          shore: state.shore,
-          result: Error(ExitMessage(string.inspect(reason))),
-          on_disconnect: state.on_disconnect,
-        )),
-      )
-    msg, Init(..) ->
+    SshExit(reason:, ..), State(..) as state -> {
+      Error(StopState(
+        State(..state, result: Error(ExitMessage(string.inspect(reason)))),
+      ))
+    }
+    msg, Init(..) -> {
       panic as { "state misconfigured on message: " <> string.inspect(msg) }
-    SshChannelUp(..), State(..) ->
+    }
+    SshChannelUp(..), State(..) -> {
       panic as { "state already configured on channel up" }
+    }
   }
   |> to_continue
 }
@@ -223,15 +225,7 @@ pub fn handle_ssh_msg(
         // ignore or exit on any other event
         SshCm(_, Eof(..)) -> state |> Ok |> to_continue
         SshCm(_, Closed(..)) ->
-          Error(
-            StopState(TerminateState(
-              ssh_pid: state.ssh_pid,
-              channel_id: state.channel_id,
-              shore: state.shore,
-              result: Ok(Nil),
-              on_disconnect: state.on_disconnect,
-            )),
-          )
+          Error(StopState(State(..state, result: Ok(Nil))))
           |> to_continue
 
         SshCm(_, Env(..)) -> state |> Ok |> to_continue
@@ -240,15 +234,7 @@ pub fn handle_ssh_msg(
         SshCm(_, Signal(..)) -> state |> Ok |> to_continue
         SshCm(_, ExitStatus(..)) -> state |> Ok |> to_continue
         SshCm(_, ExitSignal(..)) ->
-          Error(
-            StopState(TerminateState(
-              ssh_pid: state.ssh_pid,
-              channel_id: state.channel_id,
-              shore: state.shore,
-              result: Ok(Nil),
-              on_disconnect: state.on_disconnect,
-            )),
-          )
+          Error(StopState(State(..state, result: Ok(Nil))))
           |> to_continue
       }
     }
@@ -262,25 +248,11 @@ pub fn handle_ssh_msg(
 // EXIT
 //
 
-// note: any changes to this may need to be updated in beach_ffi.to_continue
-pub opaque type TerminateState(model, msg) {
-  TerminateState(
-    ssh_pid: Pid,
-    channel_id: ChannelId,
-    shore: Subject(shore.Event(msg)),
-    result: Result(Nil, SshCliError),
-    on_disconnect: fn(ssh_server.Connection, Subject(shore.Event(msg))) -> Nil,
-  )
-}
-
-// NOTE: return value is ignored
-pub fn terminate(_reason: Reason, state: TerminateState(model, msg)) -> Nil {
-  let connection = ssh_server.to_connection(connection_info(state.ssh_pid))
-  state.on_disconnect(connection, state.shore)
-  let assert Ok(Nil) =
-    shore_internal.restore_terminal()
-    |> send(state.ssh_pid, state.channel_id, _, timeout)
-  Nil
+pub fn terminate(_reason: Reason, state: State(model, msg)) -> Nil {
+  case state {
+    Init(..) -> Nil
+    State(..) as state -> state.on_disconnect(state.connection, state.shore)
+  }
 }
 
 //

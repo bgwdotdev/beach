@@ -2,7 +2,7 @@ import beach/internal/ssh_server
 import gleam/erlang/charlist
 
 //
-// -behaviour(ssh_serve_key_api)
+// -behaviour(ssh_server_key_api)
 //
 
 pub type Algorithm

@@ -1,5 +1,6 @@
 import beach/internal/ssh_server
 import gleam/erlang/process.{type Subject}
+import gleam/option.{type Option}
 import gleam/result
 import shore
 import shore/internal as shore_internal
@@ -57,6 +58,9 @@ pub fn connection_info(info: ssh_server.Connection) -> ConnectionInfo {
 /// `on_disconnect`: a callback to run when a connection terminates for any
 /// reason, exposes the ssh username as well as the specific shore subject.
 ///
+/// `max_sessions`: the maximum number of ssh sessions that can be open at once,
+/// this includes login attempts.
+///
 /// ## Example
 /// ```gleam
 /// beach.config(
@@ -65,6 +69,7 @@ pub fn connection_info(info: ssh_server.Connection) -> ConnectionInfo {
 ///   auth: beach.auth_anonymous(),
 ///   on_connect: fn(_connection, _shore) { Nil },
 ///   on_disconnect: fn(_connection, _shore) { Nil },
+///   max_sessions: Some(1000),
 /// )
 /// ```
 pub fn config(
@@ -78,6 +83,7 @@ pub fn config(
     Subject(shore.Event(msg)),
   ) ->
     Nil,
+  max_sessions max_sessions: Option(Int),
 ) -> ssh_server.Config(msg) {
   ssh_server.Config(
     port:,
@@ -85,6 +91,7 @@ pub fn config(
     auth:,
     on_connect:,
     on_disconnect:,
+    max_sessions:,
   )
 }
 
@@ -109,6 +116,7 @@ pub fn config(
 ///       auth: beach.auth_anonymous(),
 ///       on_connect: fn(_connection, _shore) { Nil },
 ///       on_disconnect: fn(_connection, _shore) { Nil },
+///       max_sessions: Some(1000),
 ///     )
 ///   let assert Ok(_) = beach.start(spec, config)
 ///   process.sleep_forever()

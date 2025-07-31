@@ -18,7 +18,7 @@ daemon(Port, Opts) ->
 to_continue(Result) ->
   case Result of
     {error, {stop_reason, Reason}} -> {stop, Reason};
-    {error, {stop_state, T = {terminate_state, _, ChannelId, _, _, _}}} -> {stop, ChannelId, T};
+    {error, {stop_state, T = {state, _, ChannelId, _, _, _, _}}} -> {stop, ChannelId, T};
     {ok, State} -> {ok, State}
   end.
 
