@@ -43,6 +43,7 @@ pub fn main() {
       auth: beach.auth_anonymous(),
       on_connect: fn(_connection, _shore) { Nil },
       on_disconnect: fn(_connection, _shore) { Nil },
+      max_sessions: Some(1000),
     )
   let assert Ok(_) = beach.start(spec, config)
   process.sleep_forever()
