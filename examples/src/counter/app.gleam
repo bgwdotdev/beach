@@ -1,7 +1,7 @@
 import beach
 import gleam/erlang/process
 import gleam/int
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import shore
 import shore/key
 import shore/layout
@@ -28,6 +28,7 @@ pub fn main() {
       auth: beach.auth_anonymous(),
       on_connect: fn(_conn, _shore) { Nil },
       on_disconnect: fn(_conn, _shore) { Nil },
+      max_sessions: None,
     )
   let assert Ok(_) = beach.start(spec, config)
   process.sleep_forever()

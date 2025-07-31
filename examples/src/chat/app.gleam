@@ -7,6 +7,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
+import logging.{Debug}
 import shore
 import shore/layout
 import shore/style
@@ -15,6 +16,8 @@ import shore/ui
 // MAIN
 
 pub fn main() {
+  logging.configure()
+  logging.set_level(Debug)
   let assert Ok(actor.Started(data: server, ..)) = server()
 
   let spec =
@@ -31,8 +34,10 @@ pub fn main() {
       port: 2222,
       host_key_directory: ".",
       auth: beach.auth_anonymous(),
+      //auth: beach.auth_public_key(fn(username, key) { True }),
       on_connect: fn(conn, shore) { on_connect(conn, shore, server) },
       on_disconnect: fn(conn, shore) { on_disconnect(conn, shore, server) },
+      max_sessions: None,
     )
   let assert Ok(_) = beach.start(spec, config)
   process.sleep_forever()
@@ -172,7 +177,7 @@ fn view_chat(model: Model) -> layout.Cell(Msg) {
   |> list.reverse
   |> list.map(fn(chat) { chat.username <> ": " <> chat.content })
   |> string.join("\n")
-  |> fn(chat) { [ui.text(chat)] }
+  |> fn(chat) { [ui.text_wrapped(chat)] }
   |> ui.box(Some("chat"))
   |> layout.cell(row: #(0, 0), col: #(0, 0), content: _)
 }
